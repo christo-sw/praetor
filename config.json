@@ -1,0 +1,23 @@
+{
+  "ping": {
+    "targets": [
+      {
+        "endpoint": "8.8.8.8",
+        "intervalMs": 100
+      },
+      {
+        "endpoint": "1.1.1.1",
+        "intervalMs": 500
+      }
+    ]
+  },
+  "speedtest": {
+    "targets": [
+      {
+        "serverID": 4255
+      }
+    ],
+    "unit": "Mbps",
+    "intervalMs": 30000
+  }
+}

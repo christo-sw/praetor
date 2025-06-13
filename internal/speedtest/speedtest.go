@@ -3,11 +3,17 @@ package speedtest
 import (
 	"encoding/json"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
-func RunSpeedtest() (*SpeedtestResult, error) {
-	cmd := exec.Command("speedtest", "-f", "json")
+func RunSpeedtest(serverID int) (*SpeedtestResult, error) {
+	var cmd *exec.Cmd
+	if serverID != 0 {
+		cmd = exec.Command("speedtest", "-s", strconv.FormatInt(int64(serverID), 10), "-f", "json")
+	} else {
+		cmd = exec.Command("speedtest", "-f", "json")
+	}
 
 	data, err := cmd.Output()
 	if err != nil {

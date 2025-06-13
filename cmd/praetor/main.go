@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/christo-sw/praetor/internal/config"
 	"github.com/christo-sw/praetor/internal/speedtest"
 	probing "github.com/prometheus-community/pro-bing"
 )
@@ -41,73 +42,96 @@ func (p Ping) String() string {
 }
 
 func main() {
-	pinger, err := probing.NewPinger("8.8.8.8")
+	config, err := config.ParseConfig()
 	if err != nil {
 		panic(err)
 	}
 
-	go SpeedtestThread(30 * time.Second)
+	pingers := make([]*probing.Pinger, 0)
+
+	err = registerPingers(&pingers, config)
+	if err != nil {
+		panic(err)
+	}
 
 	// Listen for Ctrl-C.
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for range c {
-			pinger.Stop()
+			stopPingers(&pingers)
 		}
 	}()
 
-	pingResponses := make([]Ping, 0, 2048)
+	go speedtestThread(config)
+	runPingers(&pingers)
 
-	if runtime.GOOS == "windows" {
-		pinger.SetPrivileged(true)
-	}
+	// pingResponses := make([]Ping, 0, 2048)
+}
 
-	pinger.Interval = 100 * time.Millisecond
-	m := sync.Mutex{}
-
-	pinger.OnSend = func(pkt *probing.Packet) {
-		m.Lock()
-		pingResponses = append(pingResponses, Ping{
-			Seq:        pkt.Seq,
-			SentPacket: pkt,
-		})
-		m.Unlock()
-	}
-
-	pinger.OnRecv = func(pkt *probing.Packet) {
-		fmt.Printf("RTT: %v\n", pkt.Rtt)
-		m.Lock()
-		for i := len(pingResponses) - 1; i >= 0; i++ {
-			if pingResponses[i].Seq == pkt.Seq {
-				pingResponses[i].ReceivedPacket = pkt
-				pingResponses[i].Stats = pinger.Statistics()
-				break
-			}
+func registerPingers(pingers *[]*probing.Pinger, cfg *config.Config) error {
+	for _, target := range cfg.Ping.Targets {
+		pinger, err := probing.NewPinger(target.Endpoint)
+		if err != nil {
+			return fmt.Errorf("failed to create pinger: %v", err)
 		}
-		m.Unlock()
+
+		if runtime.GOOS == "windows" {
+			pinger.SetPrivileged(true)
+		}
+
+		pinger.Interval = time.Duration(target.IntervalMS) * time.Millisecond
+
+		pinger.OnSend = func(pkt *probing.Packet) {
+			fmt.Printf("Seq: %v, IP: %v\n", pkt.Seq, pkt.Addr)
+		}
+
+		pinger.OnRecv = func(pkt *probing.Packet) {
+			fmt.Printf("Seq: %v, IP: %v, RTT: %v\n", pkt.Seq, pkt.Addr, pkt.Rtt)
+		}
+
+		pinger.OnFinish = func(stats *probing.Statistics) {
+		}
+
+		*pingers = append(*pingers, pinger)
 	}
 
-	pinger.OnFinish = func(stats *probing.Statistics) {
-		fmt.Printf("DONE!\n")
+	return nil
+}
+
+func runPingers(pingers *[]*probing.Pinger) {
+	wg := sync.WaitGroup{}
+	wg.Add(len(*pingers))
+
+	for _, pinger := range *pingers {
+		go func() {
+			_ = pinger.Run()
+			wg.Done()
+		}()
 	}
 
-	fmt.Printf("PING %s (%s):\n", pinger.Addr(), pinger.IPAddr())
-	err = pinger.Run()
-	if err != nil {
-		panic(err)
+	wg.Wait()
+}
+
+func stopPingers(pingers *[]*probing.Pinger) {
+	for _, pinger := range *pingers {
+		pinger.Stop()
 	}
 }
 
-func SpeedtestThread(d time.Duration) {
+func speedtestThread(cfg *config.Config) {
+	unit := speedtest.ParseUnit(cfg.Speedtest.Unit)
+
 	for {
-		speedtestResults, err := speedtest.RunSpeedtest()
-		if err != nil {
-			panic(err)
+		for _, target := range cfg.Speedtest.Targets {
+			speedtestResults, err := speedtest.RunSpeedtest(target.ServerID)
+			if err != nil {
+				panic(err)
+			}
+
+			fmt.Printf("Download: %v Mbps, Upload: %v Mbps\n", speedtestResults.DownloadSpeed(unit), speedtestResults.UploadSpeed(unit))
 		}
 
-		fmt.Printf("Download: %v Mbps, Upload: %v Mbps\n", speedtestResults.DownloadSpeed(speedtest.Mbps), speedtestResults.UploadSpeed(speedtest.Mbps))
-
-		time.Sleep(d)
+		time.Sleep(time.Duration(cfg.Speedtest.IntervalMS) * time.Millisecond)
 	}
 }

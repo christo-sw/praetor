@@ -17,6 +17,29 @@ const (
 	GBps
 )
 
+func ParseUnit(s string) SpeedUnit {
+	switch s {
+	case "bps":
+		return Bps
+	case "Bps":
+		return Byps
+	case "Kbps":
+		return Kbps
+	case "KBps":
+		return KBps
+	case "Mbps":
+		return Mbps
+	case "MBps":
+		return MBps
+	case "Gbps":
+		return Gbps
+	case "GBps":
+		return GBps
+	}
+
+	return Byps
+}
+
 type SpeedtestLog struct {
 	Type      string    `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
